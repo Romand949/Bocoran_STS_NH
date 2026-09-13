@@ -743,6 +743,19 @@
   .satuanToggle button:active{transform:scale(.96);}
   .satuanToggle button.active{background:var(--pine-900); border-color:var(--pine-900); color:#f3ede0; box-shadow:0 3px 10px rgba(12,41,29,.22);}
 
+  /* ============ UNDO/REDO (khusus Owner) ============ */
+  .undoRedoRow{display:flex; gap:8px; padding:6px 14px 4px;}
+  .undoRedoBtn{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:10px 8px; border-radius:11px; border:1.4px solid var(--line);
+    background:var(--card); color:var(--ink); font-size:12.5px; font-weight:650;
+    font-family:inherit; cursor:pointer;
+  }
+  .undoRedoBtn svg{width:15px; height:15px; flex:0 0 auto;}
+  .undoRedoBtn:disabled{opacity:.38; cursor:default;}
+  .undoRedoBtn:not(:disabled):active{transform:scale(.94);}
+  .undoRedoBtn.justUsed{animation:pulseUpdate .32s var(--ios-spring);}
+
   /* ============ TOGGLE SWITCH (Pengaturan Notifikasi) ============ */
   .prefToggle{position:relative; display:inline-block; width:46px; height:27px; flex:0 0 auto;}
   .prefToggle input{opacity:0; width:0; height:0;}
@@ -1125,6 +1138,17 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         <span>Pengaturan</span>
       </button>
+      <div class="menuDropDivider" id="undoRedoDivider" style="display:none;"></div>
+      <div class="undoRedoRow" id="undoRedoRow" style="display:none;">
+        <button class="undoRedoBtn" id="undoBtn" disabled title="Urungkan aksi terakhir">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-6.7L3 9"/></svg>
+          <span>Undo</span>
+        </button>
+        <button class="undoRedoBtn" id="redoBtn" disabled title="Ulangi aksi yang di-undo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M21 13a9 9 0 1 1-3-6.7L21 9"/></svg>
+          <span>Redo</span>
+        </button>
+      </div>
       <div class="menuDropDivider"></div>
       <button class="menuDropItem menuDropItem-danger" id="logoutBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
@@ -1722,6 +1746,7 @@ function prosesLogout(diam){
   if(unsubStokMenipis){ unsubStokMenipis(); unsubStokMenipis = null; }
   if(unsubStokCupMenipis){ unsubStokCupMenipis(); unsubStokCupMenipis = null; }
   SESI = null;
+  UNDO_STACK = []; REDO_STACK = []; // riwayat undo tidak boleh lintas sesi/akun
   hapusSesiLokal();
   terapkanTampilanJabatan();
   bukaLoginScreen();
@@ -1802,6 +1827,101 @@ function terapkanTampilanJabatan(){
   el('adminBtn').style.display = isOwner ? 'flex' : 'none';
   el('modeEditMenuBtn').style.display = isOwner ? 'flex' : 'none';
   el('stokBtn').style.display = isOwner ? 'flex' : 'none';
+  el('undoRedoRow').style.display = isOwner ? 'flex' : 'none';
+  el('undoRedoDivider').style.display = isOwner ? 'block' : 'none';
+
+/* =====================================================================
+   UNDO / REDO (khusus Owner) — mencakup semua aksi tulis-data milik
+   Owner: Kelola Menu (tambah/edit/hapus/toggle habis), Kelola Stok Barang
+   (ketik ulang angka & restock), dan Kelola Akun (tambah/edit/hapus).
+   Checkout kasir & void transaksi TIDAK masuk sini -- itu sudah punya
+   mekanisme sendiri (void/reject) yang lebih tepat karena menyangkut uang.
+
+   Cara kerja: setiap aksi yang mau bisa di-undo memanggil catatAksiUndo()
+   dengan 2 fungsi kecil -- undo() dan redo() -- yang masing2 tahu cara
+   mengembalikan/mengulang aksi itu di Firestore. Ini seperti "command
+   pattern" ringan: kita tidak menyimpan snapshot seluruh DB, cukup
+   snapshot dokumen yang benar2 berubah oleh aksi itu.
+   ===================================================================== */
+}
+
+let UNDO_STACK = [];
+let REDO_STACK = [];
+const UNDO_STACK_MAX = 30;
+let sedangUndoRedo = false; // supaya aksi yg dijalankan OLEH undo/redo tidak ikut kecatat lagi
+
+// Dipanggil oleh tiap titik simpan/hapus SETELAH aksi asli berhasil.
+// undoFn/redoFn: async function tanpa argumen, mengembalikan Promise.
+function catatAksiUndo(label, undoFn, redoFn){
+  if(sedangUndoRedo) return; // aksi ini sendiri hasil dari undo/redo, jangan dobel-catat
+  UNDO_STACK.push({ label, undoFn, redoFn });
+  if(UNDO_STACK.length > UNDO_STACK_MAX) UNDO_STACK.shift();
+  REDO_STACK = []; // aksi baru selalu memutus jalur redo lama
+  perbaruiTombolUndoRedo();
+}
+
+function perbaruiTombolUndoRedo(){
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
+  if(!undoBtn || !redoBtn) return;
+  undoBtn.disabled = UNDO_STACK.length === 0;
+  redoBtn.disabled = REDO_STACK.length === 0;
+  undoBtn.title = UNDO_STACK.length ? `Urungkan: ${UNDO_STACK[UNDO_STACK.length-1].label}` : 'Urungkan aksi terakhir';
+  redoBtn.title = REDO_STACK.length ? `Ulangi: ${REDO_STACK[REDO_STACK.length-1].label}` : 'Ulangi aksi yang di-undo';
+}
+
+async function jalankanUndo(){
+  if(UNDO_STACK.length === 0 || sedangUndoRedo) return;
+  const aksi = UNDO_STACK.pop();
+  sedangUndoRedo = true;
+  const btn = el('undoBtn'); btn.disabled = true;
+  try{
+    await aksi.undoFn();
+    REDO_STACK.push(aksi);
+    showToast(`Diurungkan: ${aksi.label}`);
+  }catch(e){
+    UNDO_STACK.push(aksi); // gagal -> taruh balik supaya tidak hilang
+    showToast("Gagal undo. Cek koneksi.", false);
+  }finally{
+    sedangUndoRedo = false;
+    perbaruiTombolUndoRedo();
+    btn.classList.add('justUsed');
+    setTimeout(()=>btn.classList.remove('justUsed'), 340);
+  }
+}
+
+async function jalankanRedo(){
+  if(REDO_STACK.length === 0 || sedangUndoRedo) return;
+  const aksi = REDO_STACK.pop();
+  sedangUndoRedo = true;
+  const btn = el('redoBtn'); btn.disabled = true;
+  try{
+    await aksi.redoFn();
+    UNDO_STACK.push(aksi);
+    showToast(`Diulangi: ${aksi.label}`);
+  }catch(e){
+    REDO_STACK.push(aksi);
+    showToast("Gagal redo. Cek koneksi.", false);
+  }finally{
+    sedangUndoRedo = false;
+    perbaruiTombolUndoRedo();
+    btn.classList.add('justUsed');
+    setTimeout(()=>btn.classList.remove('justUsed'), 340);
+  }
+}
+
+el('undoBtn').onclick = jalankanUndo;
+el('redoBtn').onclick = jalankanRedo;
+
+// Shortcut keyboard utk yang pakai keyboard fisik (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) --
+// tetap aman di HP karena cuma aktif kalau ada event keydown fisik.
+document.addEventListener('keydown', (e)=>{
+  if(!SESI || SESI.jabatan !== 'Owner') return;
+  const z = e.key === 'z' || e.key === 'Z';
+  if(!z || !(e.ctrlKey||e.metaKey)) return;
+  e.preventDefault();
+  if(e.shiftKey) jalankanRedo(); else jalankanUndo();
+});
   // Kelola Stok Cup sekarang boleh diakses SEMUA jabatan (bukan cuma Owner) --
   // karyawan yang belum punya izin akan melihat tombol "Minta Izin Akses" di
   // dalamnya (lihat renderKelolaStokCup), bukan langsung diblok di sini.
@@ -2429,9 +2549,15 @@ async function toggleHabisItem(ci, ii){
     const snap = await getDoc(ref);
     if(!snap.exists()) return;
     const data = snap.data();
-    const varianBaru = (data.varian||[]).map(v=> ({...v, habis: !habisSekarang }));
+    const varianLama = data.varian || [];
+    const varianBaru = varianLama.map(v=> ({...v, habis: !habisSekarang }));
     await updateDoc(ref, { varian: varianBaru });
     showToast(habisSekarang ? "Menu ditandai tersedia lagi" : "Menu ditandai habis");
+    catatAksiUndo(
+      `tandai ${habisSekarang?'tersedia':'habis'} \u2014 ${item.nama}`,
+      async ()=>{ await updateDoc(ref, { varian: varianLama }); if(!sedangUndoRedo) return; renderAdminList(); },
+      async ()=>{ await updateDoc(ref, { varian: varianBaru }); }
+    );
   }catch(e){ showToast("Gagal mengubah status. Cek koneksi.", false); }
 }
 
@@ -2514,11 +2640,23 @@ function openAdminForm(target, dariLuar){
     try{
       const payload = { kategori, nama, varian: validVarian.map(v=>({ ukuran: v.nama, harga: v.harga||0, tambahan: (v.tambahan||'').trim(), habis: false })) };
       if(target){
-        await updateDoc(doc(db, "menu", item.id), payload);
+        const payloadLama = { kategori: cat.kategori, nama: item.nama, varian: item.varian };
+        const ref = doc(db, "menu", item.id);
+        await updateDoc(ref, payload);
         showToast("Menu diperbarui");
+        catatAksiUndo(
+          `edit menu \u2014 ${nama}`,
+          async ()=>{ await updateDoc(ref, payloadLama); renderAdminList(); },
+          async ()=>{ await updateDoc(ref, payload); renderAdminList(); }
+        );
       } else {
-        await addDoc(collection(db, "menu"), payload);
+        const docRef = await addDoc(collection(db, "menu"), payload);
         showToast("Menu ditambahkan");
+        catatAksiUndo(
+          `tambah menu \u2014 ${nama}`,
+          async ()=>{ await deleteDoc(doc(db, "menu", docRef.id)); renderAdminList(); },
+          async ()=>{ await setDoc(doc(db, "menu", docRef.id), payload); renderAdminList(); }
+        );
       }
       if(dariLuar){ tutupOverlaySmooth(el('adminOverlay2')); }
       else { renderAdminList(); }
@@ -2533,7 +2671,17 @@ function confirmDelete(ci, ii){
   const cat = MENU[ci], item = cat.items[ii];
   if(!confirm(`Hapus "${item.nama}" dari menu?`)) return;
   (async ()=>{
-    try{ await deleteDoc(doc(db, "menu", item.id)); showToast("Menu dihapus"); }
+    try{
+      const payloadLama = { kategori: cat.kategori, nama: item.nama, varian: item.varian };
+      await deleteDoc(doc(db, "menu", item.id));
+      showToast("Menu dihapus");
+      const idLama = item.id;
+      catatAksiUndo(
+        `hapus menu \u2014 ${item.nama}`,
+        async ()=>{ await setDoc(doc(db, "menu", idLama), payloadLama); renderAdminList(); },
+        async ()=>{ await deleteDoc(doc(db, "menu", idLama)); renderAdminList(); }
+      );
+    }
     catch(e){ showToast("Gagal menghapus. Cek koneksi.", false); }
   })();
 }
@@ -3181,6 +3329,12 @@ async function voidTransaksi(trxId, dariDetail){
   if(dariDetail) tutupOverlaySmooth(el('trxDetailOverlay'));
 
   try{
+    // Ambil snapshot dokumen transaksi ASLI (utuh, bukan cuma ringkasan trxDetailMap)
+    // dulu SEBELUM dihapus -- ini yang dipakai untuk undo (tulis ulang persis).
+    const trxRef = doc(db, "transaksi", trxId);
+    const trxSnap = await getDoc(trxRef);
+    const trxDataAsli = trxSnap.exists() ? trxSnap.data() : null;
+
     // Kembalikan stok tiap item (kalau outlet-nya kelola stok utk varian itu) SEBELUM
     // dokumen transaksinya dihapus, supaya kalau gagal di tengah jalan datanya masih ada
     // untuk dicoba ulang -- lebih aman daripada hapus dulu baru kembalikan stok.
@@ -3198,11 +3352,55 @@ async function voidTransaksi(trxId, dariDetail){
         }catch(e){ /* gagal kembalikan stok utk 1 item, tetap lanjut hapus transaksi */ }
       }
     }
-    await deleteDoc(doc(db, "transaksi", trxId));
+    await deleteDoc(trxRef);
 
     // Tidak perlu toast sukses -- transaksi langsung hilang dari daftar laporan,
     // itu sudah cukup jadi tanda kalau prosesnya berhasil.
     await muatLaporanTanggal(lapTanggalAktif);
+
+    if(trxDataAsli){
+      catatAksiUndo(
+        `batalkan transaksi \u2014 ${t ? rupiah(t.total) : trxId}`,
+        async ()=>{
+          // Tulis ulang transaksi persis seperti semula, lalu kurangi lagi stok
+          // yang tadi sempat dikembalikan (supaya konsisten dgn keadaan sebelum void).
+          await setDoc(trxRef, trxDataAsli);
+          if(t && t.outlet && t.items && t.items.length){
+            for(const it of t.items){
+              const stokDocId = (t.outlet+'_'+it.kategori+'_'+it.nama+'_'+it.varian).replace(/[^a-zA-Z0-9]/g,'_');
+              const stokRef = doc(db, "stok", stokDocId);
+              try{
+                await runTransaction(db, async (tx)=>{
+                  const snap = await tx.get(stokRef);
+                  if(!snap.exists()) return;
+                  const skrg = Number(snap.data().jumlah)||0;
+                  tx.update(stokRef, { jumlah: Math.max(0, skrg - (it.qty||0)) });
+                });
+              }catch(e){}
+            }
+          }
+          await muatLaporanTanggal(lapTanggalAktif);
+        },
+        async ()=>{
+          if(t && t.outlet && t.items && t.items.length){
+            for(const it of t.items){
+              const stokDocId = (t.outlet+'_'+it.kategori+'_'+it.nama+'_'+it.varian).replace(/[^a-zA-Z0-9]/g,'_');
+              const stokRef = doc(db, "stok", stokDocId);
+              try{
+                await runTransaction(db, async (tx)=>{
+                  const snap = await tx.get(stokRef);
+                  if(!snap.exists()) return;
+                  const skrg = Number(snap.data().jumlah)||0;
+                  tx.update(stokRef, { jumlah: skrg + (it.qty||0) });
+                });
+              }catch(e){}
+            }
+          }
+          await deleteDoc(trxRef);
+          await muatLaporanTanggal(lapTanggalAktif);
+        }
+      );
+    }
   }catch(e){
     showToast("Gagal membatalkan. Cek koneksi.", false);
     console.error('Gagal void transaksi:', e);
@@ -3501,8 +3699,26 @@ function openAkunForm(akun){
         return;
       }
       const payload = { username, password, namaTampilan, jabatan, outlet, mulaiJam, sampaiJam };
-      if(akun){ await updateDoc(doc(db, "akun", akun.id), payload); showToast("Akun diperbarui"); }
-      else{ await addDoc(collection(db, "akun"), payload); showToast("Akun ditambahkan"); }
+      if(akun){
+        const payloadLama = { username: akun.username, password: akun.password, namaTampilan: akun.namaTampilan, jabatan: akun.jabatan, outlet: akun.outlet, mulaiJam: akun.mulaiJam, sampaiJam: akun.sampaiJam };
+        const ref = doc(db, "akun", akun.id);
+        await updateDoc(ref, payload);
+        showToast("Akun diperbarui");
+        catatAksiUndo(
+          `edit akun \u2014 ${username}`,
+          async ()=>{ await updateDoc(ref, payloadLama); renderAkunList(); },
+          async ()=>{ await updateDoc(ref, payload); renderAkunList(); }
+        );
+      }
+      else{
+        const docRef = await addDoc(collection(db, "akun"), payload);
+        showToast("Akun ditambahkan");
+        catatAksiUndo(
+          `tambah akun \u2014 ${username}`,
+          async ()=>{ await deleteDoc(doc(db, "akun", docRef.id)); renderAkunList(); },
+          async ()=>{ await setDoc(doc(db, "akun", docRef.id), payload); renderAkunList(); }
+        );
+      }
 
       // Pastikan outlet baru (kalau ada) tercatat di koleksi "outlet" supaya muncul di daftar.
       if(outlet){
@@ -3523,10 +3739,17 @@ function openAkunForm(akun){
     delBtn.onclick = async ()=>{
       if(!confirm(`Hapus akun "${akun.username}"? Tindakan ini tidak bisa dibatalkan.`)) return;
       try{
-        await deleteDoc(doc(db, "akun", akun.id));
+        const payloadLama = { username: akun.username, password: akun.password, namaTampilan: akun.namaTampilan, jabatan: akun.jabatan, outlet: akun.outlet, mulaiJam: akun.mulaiJam, sampaiJam: akun.sampaiJam };
+        const idLama = akun.id;
+        await deleteDoc(doc(db, "akun", idLama));
         showToast("Akun dihapus");
         tutupOverlaySmooth(el('akunFormOverlay'));
         renderAkunList();
+        catatAksiUndo(
+          `hapus akun \u2014 ${akun.username}`,
+          async ()=>{ await setDoc(doc(db, "akun", idLama), payloadLama); renderAkunList(); },
+          async ()=>{ await deleteDoc(doc(db, "akun", idLama)); renderAkunList(); }
+        );
       }catch(e){ showToast("Gagal menghapus. Cek koneksi.", false); }
     };
   }
@@ -5164,9 +5387,18 @@ function renderKelolaStok(){
 async function simpanStokManual(kategori, nama, ukuran, stokBaru){
   try{
     const id = stokDocId(STOK_OUTLET_AKTIF, kategori, nama, ukuran);
-    await setDoc(doc(db, "stok", id), { outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran, jumlah: Math.max(0, stokBaru) }, { merge: true });
+    const ref = doc(db, "stok", id);
+    const snapLama = await getDoc(ref);
+    const stokLama = snapLama.exists() ? (Number(snapLama.data().jumlah)||0) : 0;
+    const nilaiBaru = Math.max(0, stokBaru);
+    await setDoc(ref, { outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran, jumlah: nilaiBaru }, { merge: true });
     showToast("Stok diperbarui");
     await muatKelolaStok();
+    catatAksiUndo(
+      `ubah stok \u2014 ${nama} jadi ${nilaiBaru}`,
+      async ()=>{ await setDoc(ref, { outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran, jumlah: stokLama }, { merge: true }); await muatKelolaStok(); },
+      async ()=>{ await setDoc(ref, { outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran, jumlah: nilaiBaru }, { merge: true }); await muatKelolaStok(); }
+    );
   }catch(e){ showToast("Gagal menyimpan stok. Cek koneksi.", false); }
 }
 
@@ -5248,14 +5480,16 @@ function bukaFormRestock(kategori, nama, ukuran){
     try{
       const id = stokDocId(STOK_OUTLET_AKTIF, kategori, nama, ukuran);
       const ref = doc(db, "stok", id);
+      let stokSebelum = 0;
       let stokSesudah = totalSasetDitambah;
       await runTransaction(db, async (tx)=>{
         const snap = await tx.get(ref);
         const skrg = snap.exists() ? (Number(snap.data().jumlah)||0) : 0;
+        stokSebelum = skrg;
         stokSesudah = skrg + totalSasetDitambah;
         tx.set(ref, { outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran, jumlah: stokSesudah }, { merge: true });
       });
-      await addDoc(collection(db, "riwayat_restock"), {
+      const riwayatRef = await addDoc(collection(db, "riwayat_restock"), {
         waktu: Timestamp.fromDate(new Date()), outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran,
         satuan: restockSatuanAktif, jumlahInput, isiRoll: isiRollDipakai,
         jumlahDitambahCup: totalSasetDitambah, stokSesudah, oleh: SESI.namaTampilan
@@ -5263,6 +5497,11 @@ function bukaFormRestock(kategori, nama, ukuran){
       showToast(`Restock berhasil \u2014 +${catatanSatuan}, stok sekarang ${stokSesudah} saset`);
       tutupOverlaySmooth(el('restockOverlay'));
       await muatKelolaStok();
+      catatAksiUndo(
+        `restock \u2014 ${nama} (+${catatanSatuan})`,
+        async ()=>{ await setDoc(ref, { outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran, jumlah: stokSebelum }, { merge: true }); await deleteDoc(riwayatRef); await muatKelolaStok(); },
+        async ()=>{ await setDoc(ref, { outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran, jumlah: stokSesudah }, { merge: true }); await muatKelolaStok(); }
+      );
     }catch(e){ showToast("Gagal restock. Cek koneksi.", false); btn.disabled=false; btn.textContent="Simpan Restock"; }
   };
   el('restockOverlay').classList.add('show');
