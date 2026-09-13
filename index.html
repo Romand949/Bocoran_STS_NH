@@ -5117,10 +5117,11 @@ function cariStok(kategori, nama, ukuran){
 
 function renderKelolaStok(){
   let html = `<div class="empty" style="padding:6px 4px 16px; text-align:left; font-size:12px;">
-      Stok di bawah khusus untuk outlet <b>${STOK_OUTLET_AKTIF}</b>. Ketik ulang angka untuk menimpa langsung, atau gunakan tombol Restock (bisa satuan cup atau roll) untuk menambah stok dengan tercatat di histori.
+      Stok di bawah khusus untuk outlet <b>${STOK_OUTLET_AKTIF}</b>. Ketik ulang angka untuk menimpa langsung, atau gunakan tombol Restock (bisa satuan saset atau renceng) untuk menambah stok dengan tercatat di histori.
     </div>
     <button class="addBtn" id="riwayatRestockBtn" style="border-style:solid; background:var(--pine-50);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 106 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>Lihat Riwayat Restock</button>`;
   MENU.forEach(cat=>{
+    if(cat.kategori === 'Es Teh Manis') return; // Es teh manis diseduh langsung, bukan barang saset/renceng yang perlu dikelola stoknya
     html += `<div class="catLabelAdmin">${cat.kategori}</div>`;
     cat.items.forEach(item=>{
       item.varian.forEach(v=>{
@@ -5128,7 +5129,7 @@ function renderKelolaStok(){
         const stokSekarang = info ? info.jumlah : 0;
         const habis = stokSekarang <= 0;
         const menipis = !habis && stokSekarang <= BATAS_STOK_MENIPIS;
-        const badgeTxt = habis ? 'Habis' : (menipis ? 'Menipis \u2014 ' + stokSekarang + ' cup' : stokSekarang + ' cup');
+        const badgeTxt = habis ? 'Habis' : (menipis ? 'Menipis \u2014 ' + stokSekarang + ' saset' : stokSekarang + ' saset');
         const badgeCls = habis ? 'habis' : (menipis ? 'menipis' : '');
         html += `<div class="adminItem" data-kategori="${cat.kategori}" data-nama="${item.nama}" data-ukuran="${v.nama}">
           <div class="aiTop">
@@ -5184,21 +5185,21 @@ function bukaFormRestock(kategori, nama, ukuran){
 
   el('restockBody').innerHTML = `
     <div class="formField"><label>Menu</label><div class="karyawanTampil">${nama} \u00b7 ${normalisasiUkuran(ukuran, nama)}</div></div>
-    <div class="formField"><label>Stok Sekarang</label><div class="karyawanTampil">${stokSekarang} cup</div></div>
+    <div class="formField"><label>Stok Sekarang</label><div class="karyawanTampil">${stokSekarang} saset</div></div>
     <div class="formField">
       <label>Satuan Penambahan</label>
       <div class="satuanToggle" id="restockSatuanToggle">
-        <button data-s="cup" class="active">Per Cup</button>
-        <button data-s="roll">Per Roll</button>
+        <button data-s="cup" class="active">Per Saset</button>
+        <button data-s="roll">Per Renceng</button>
       </div>
     </div>
     <div class="formField" id="restockRollField" style="display:none;">
-      <label>Isi per Roll (cup)</label>
-      <input id="restockIsiRoll" type="number" min="1" value="${DEFAULT_ISI_ROLL}">
-      <div class="hint">Default ${DEFAULT_ISI_ROLL} cup per roll \u2014 boleh diubah kalau roll menu ini beda isinya.</div>
+      <label>Isi per Renceng (saset)</label>
+      <input id="restockIsiRoll" type="number" min="1" placeholder="Contoh: 10">
+      <div class="hint">Isi jumlah saset dalam 1 renceng menu ini.</div>
     </div>
     <div class="formField">
-      <label id="restockJumlahLabel">Jumlah Cup Ditambah</label>
+      <label id="restockJumlahLabel">Jumlah Saset Ditambah</label>
       <input id="restockJumlah" type="number" min="1" placeholder="Contoh: 20">
       <div class="hint" id="restockPreview"></div>
     </div>
@@ -5208,9 +5209,9 @@ function bukaFormRestock(kategori, nama, ukuran){
   function updatePreview(){
     const jumlah = Number(el('restockJumlah').value) || 0;
     if(restockSatuanAktif === 'roll'){
-      const isiRoll = Number(el('restockIsiRoll').value) || DEFAULT_ISI_ROLL;
+      const isiRoll = Number(el('restockIsiRoll').value) || 0;
       const totalCup = jumlah * isiRoll;
-      el('restockPreview').textContent = jumlah > 0 ? `= ${totalCup} cup akan ditambahkan (${jumlah} roll \u00d7 ${isiRoll} cup/roll)` : '';
+      el('restockPreview').textContent = (jumlah > 0 && isiRoll > 0) ? `= ${totalCup} saset akan ditambahkan (${jumlah} renceng \u00d7 ${isiRoll} saset/renceng)` : '';
     } else {
       el('restockPreview').textContent = '';
     }
@@ -5221,7 +5222,7 @@ function bukaFormRestock(kategori, nama, ukuran){
       restockSatuanAktif = b.dataset.s;
       el('restockSatuanToggle').querySelectorAll('button').forEach(x=>x.classList.toggle('active', x===b));
       el('restockRollField').style.display = restockSatuanAktif==='roll' ? 'block' : 'none';
-      el('restockJumlahLabel').textContent = restockSatuanAktif==='roll' ? 'Jumlah Roll Ditambah' : 'Jumlah Cup Ditambah';
+      el('restockJumlahLabel').textContent = restockSatuanAktif==='roll' ? 'Jumlah Renceng Ditambah' : 'Jumlah Saset Ditambah';
       el('restockJumlah').placeholder = restockSatuanAktif==='roll' ? 'Contoh: 1' : 'Contoh: 20';
       updatePreview();
     };
@@ -5233,31 +5234,33 @@ function bukaFormRestock(kategori, nama, ukuran){
   el('restockSaveBtn').onclick = async ()=>{
     const jumlahInput = Number(el('restockJumlah').value) || 0;
     if(jumlahInput <= 0){ showToast("Isi jumlah restock yang valid", false); return; }
-    let totalCupDitambah = jumlahInput;
-    let catatanSatuan = `${jumlahInput} cup`;
+    let totalSasetDitambah = jumlahInput;
+    let catatanSatuan = `${jumlahInput} saset`;
+    let isiRollDipakai = null;
     if(restockSatuanAktif === 'roll'){
-      const isiRoll = Number(el('restockIsiRoll').value) || DEFAULT_ISI_ROLL;
-      totalCupDitambah = jumlahInput * isiRoll;
-      catatanSatuan = `${jumlahInput} roll (\u00d7${isiRoll} = ${totalCupDitambah} cup)`;
+      isiRollDipakai = Number(el('restockIsiRoll').value) || 0;
+      if(isiRollDipakai <= 0){ showToast("Isi jumlah saset per renceng dulu", false); return; }
+      totalSasetDitambah = jumlahInput * isiRollDipakai;
+      catatanSatuan = `${jumlahInput} renceng (\u00d7${isiRollDipakai} = ${totalSasetDitambah} saset)`;
     }
 
     const btn = el('restockSaveBtn'); btn.disabled = true; btn.textContent = "Menyimpan...";
     try{
       const id = stokDocId(STOK_OUTLET_AKTIF, kategori, nama, ukuran);
       const ref = doc(db, "stok", id);
-      let stokSesudah = totalCupDitambah;
+      let stokSesudah = totalSasetDitambah;
       await runTransaction(db, async (tx)=>{
         const snap = await tx.get(ref);
         const skrg = snap.exists() ? (Number(snap.data().jumlah)||0) : 0;
-        stokSesudah = skrg + totalCupDitambah;
+        stokSesudah = skrg + totalSasetDitambah;
         tx.set(ref, { outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran, jumlah: stokSesudah }, { merge: true });
       });
       await addDoc(collection(db, "riwayat_restock"), {
         waktu: Timestamp.fromDate(new Date()), outlet: STOK_OUTLET_AKTIF, kategori, nama, ukuran,
-        satuan: restockSatuanAktif, jumlahInput, isiRoll: restockSatuanAktif==='roll' ? (Number(el('restockIsiRoll').value)||DEFAULT_ISI_ROLL) : null,
-        jumlahDitambahCup: totalCupDitambah, stokSesudah, oleh: SESI.namaTampilan
+        satuan: restockSatuanAktif, jumlahInput, isiRoll: isiRollDipakai,
+        jumlahDitambahCup: totalSasetDitambah, stokSesudah, oleh: SESI.namaTampilan
       });
-      showToast(`Restock berhasil \u2014 +${catatanSatuan}, stok sekarang ${stokSesudah} cup`);
+      showToast(`Restock berhasil \u2014 +${catatanSatuan}, stok sekarang ${stokSesudah} saset`);
       tutupOverlaySmooth(el('restockOverlay'));
       await muatKelolaStok();
     }catch(e){ showToast("Gagal restock. Cek koneksi.", false); btn.disabled=false; btn.textContent="Simpan Restock"; }
@@ -5281,8 +5284,8 @@ async function bukaRiwayatRestock(){
       ${riwayat.map(r=>{
         const w = r.waktu && r.waktu.toDate ? r.waktu.toDate() : new Date();
         const waktuStr = String(w.getDate()).padStart(2,'0')+'/'+String(w.getMonth()+1).padStart(2,'0')+'/'+w.getFullYear()+' '+String(w.getHours()).padStart(2,'0')+':'+String(w.getMinutes()).padStart(2,'0');
-        const satuanTxt = r.satuan === 'roll' ? `${r.jumlahInput} roll (\u00d7${r.isiRoll})` : `${r.jumlahInput} cup`;
-        return `<div class="lapRow"><div><div class="lrn">${r.nama} \u00b7 ${normalisasiUkuran(r.ukuran, r.nama)}</div><div class="lrq">${waktuStr} \u00b7 oleh ${r.oleh}</div></div><div style="text-align:right;"><div class="lrv">+${satuanTxt}</div><div class="lrq">jadi ${r.stokSesudah} cup</div></div></div>`;
+        const satuanTxt = r.satuan === 'roll' ? `${r.jumlahInput} renceng (\u00d7${r.isiRoll})` : `${r.jumlahInput} saset`;
+        return `<div class="lapRow"><div><div class="lrn">${r.nama} \u00b7 ${normalisasiUkuran(r.ukuran, r.nama)}</div><div class="lrq">${waktuStr} \u00b7 oleh ${r.oleh}</div></div><div style="text-align:right;"><div class="lrv">+${satuanTxt}</div><div class="lrq">jadi ${r.stokSesudah} saset</div></div></div>`;
       }).join('')}
     `;
   }catch(e){ el('restockBody').innerHTML = '<div class="empty">Gagal memuat riwayat. Cek koneksi.</div>'; }
